@@ -39,10 +39,8 @@ def generate_report():
                 pdf.add_page()
                 pdf.cell(0, 10, f"CED Curve for {ds} dataset - {exp['name']}", ln=True)
                 pdf.image(str(img_path), x=10, y=20, w=pdf.w - 20)
-    
-    report_file = Path(config.REPORT_DIR)
-    report_file.mkdir(parents=True, exist_ok=True)
-    output_pdf = report_file / "experiment_report.pdf"
+
+    output_pdf = "experiment_report.pdf"
     pdf.output(str(output_pdf))
     print(f"Report saved to {output_pdf}")
 
