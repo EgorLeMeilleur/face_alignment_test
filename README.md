@@ -21,11 +21,6 @@ Annotations are provided in `.pts` format (IBUG format).
 
 ## Setup
 
-1. **Install dependencies:**  
-   Run:
-   ```bash
-   pip install -r requirements.txt
-
 Required packages include: pytorch-lightning, timm, torch, torchvision, dlib, fpdf, matplotlib, and scikit-learn.
 
     Data:
@@ -49,13 +44,9 @@ To run all experiments, execute:
     python run_experiments.py
 
 This script trains and tests each experiment variant sequentially.
-Generating the Report
-
-After experiments are complete and the CED graphs have been generated, create a PDF report by running:
-
-    python report_generation.py
-
+After experiments are complete and the CED graphs have been generated, create a PDF report will be created
 The report will be saved in the outputs/reports directory.
+
 TensorBoard
 
 To visualize training logs, run:

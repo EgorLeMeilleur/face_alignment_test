@@ -54,7 +54,7 @@ class FaceAlignmentModel(pl.LightningModule):
         if model_type == "resnet":
             self.backbone = timm.create_model("resnet18", pretrained=True, num_classes=config.NUM_POINTS * 2)
         elif model_type == "efficientnet":
-            self.backbone = timm.create_model("tf_efficientnet_b0", pretrained=True, num_classes=config.NUM_POINTS * 2)
+            self.backbone = timm.create_model("efficientnet_b0", pretrained=True, num_classes=config.NUM_POINTS * 2)
         else:
             raise ValueError("Unsupported model type")
             
@@ -87,14 +87,6 @@ class FaceAlignmentModel(pl.LightningModule):
         loss = self.criterion(preds, landmarks)
         self.log("val_loss", loss, on_step=False, on_epoch=True)
         return loss
-    
-    def test_step(self, batch, batch_idx):
-        images = batch["image"]
-        landmarks = batch["landmarks"]
-        preds = self.forward(images)
-        loss = self.criterion(preds, landmarks)
-        self.log("test_loss", loss, on_step=False, on_epoch=True)
-        return {"preds": preds, "landmarks": landmarks, "face_rect": batch["face_rect"]}
     
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=config.LEARNING_RATE)

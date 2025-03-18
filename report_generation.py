@@ -20,6 +20,14 @@ def generate_report():
     pdf.cell(0, 10, "Experiments Summary:", ln=True)
     for exp in config.EXPERIMENTS:
         pdf.cell(0, 10, f"Experiment: {exp['name']} - Model: {exp['model_type']}, Loss: {exp['loss_type']}", ln=True)
+        auc_log_file = Path(config.RESULTS_DIR) / f"auc_results_{exp['name']}.txt"
+        if auc_log_file.exists():
+            with open(auc_log_file, "r") as f:
+                auc_lines = f.readlines()
+            for line in auc_lines:
+                pdf.cell(0, 10, line.strip(), ln=True)
+    else:
+        pdf.cell(0, 10, "No AUC results found.", ln=True)
     
     pdf.ln(10)
     pdf.cell(0, 10, "CED graphs for 300W and Menpo datasets are attached below.", ln=True)
