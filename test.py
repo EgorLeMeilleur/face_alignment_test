@@ -61,8 +61,8 @@ def evaluate_dlib(predictor, files, detector):
 def count_ced(predicted_points, gt_points, normalizations):
     ceds = []
     for preds, gts, normalization in zip(predicted_points, gt_points, normalizations):
-        x_pred, y_pred = preds[::2], preds[1::2]
-        x_gt, y_gt = gts[::2], gts[1::2]
+        x_pred, y_pred = preds[:, ::2], preds[:, 1::2]
+        x_gt, y_gt = gts[:, ::2], gts[:, 1::2]
         n_points = x_pred.shape[0]
 
         diff_x = [x_gt[i] - x_pred[i] for i in range(n_points)]
@@ -79,7 +79,7 @@ def main(args):
     results_path = Path(config.RESULTS_DIR)
     results_path.mkdir(parents=True, exist_ok=True)
     log_file =  results_path / f"auc_results_{args.experiment_name}.txt"
-    thresholds = np.linspace(0, 0.08, 100)
+    thresholds = np.linspace(0, config.MAX_ERROR_THRESHOLD, 100)
     for ds_name, folder in config.TEST_FOLDERS.items():
         files = []
         for ext in ["*.jpg", "*.png"]:
@@ -94,7 +94,7 @@ def main(args):
         preds, gt, normalizations = evaluate_model(model, loader)
         ceds = count_ced(preds, gt, normalizations)
         ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-        auc_model = np.trapezoid(ced_curve, thresholds)
+        auc_model = np.trapezoid(ced_curve, thresholds) / config.MAX_ERROR_THRESHOLD
         
         plt.figure()
         plt.plot(thresholds, ced_curve, label=f'{args.experiment_name} (AUC: {auc_model:.4f})')
@@ -106,7 +106,7 @@ def main(args):
                 preds, gt, normalizations = evaluate_dlib(predictor, files, detector)
                 ceds = count_ced(preds, gt, normalizations)
                 ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-                auc_dlib= np.trapezoid(ced_curve, thresholds)
+                auc_dlib = np.trapezoid(ced_curve, thresholds) / config.MAX_ERROR_THRESHOLD
                 plt.plot(thresholds, ced_curve, label=f'dlib (AUC: {auc_dlib:.4f})')
                 print(f"{ds_name} dataset - dlib AUC: {auc_dlib:.4f}")
             except Exception as e:
