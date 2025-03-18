@@ -46,18 +46,18 @@ Running Experiments
 
 To run all experiments, execute:
 
-python run_experiments.py
+    python run_experiments.py
 
 This script trains and tests each experiment variant sequentially.
 Generating the Report
 
 After experiments are complete and the CED graphs have been generated, create a PDF report by running:
 
-python report_generation.py
+    python report_generation.py
 
 The report will be saved in the outputs/reports directory.
 TensorBoard
 
 To visualize training logs, run:
 
-tensorboard --logdir outputs/logs
+    tensorboard --logdir outputs/logs
