@@ -6,7 +6,6 @@ This project implements a face alignment algorithm for detecting 68 facial landm
 
 The following experiments are included:
 - **ResNet + MSE Loss**
-- **ResNet + Wing Loss**
 - **EfficientNet + Wing Loss**
 - **EfficientNet + Adaptive Wing Loss**
 

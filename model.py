@@ -19,30 +19,6 @@ class WingLoss(nn.Module):
                (1 - mask) * (diff - self.C)
         
         return loss.mean()
-    
-class AdaptiveWingLoss(nn.Module):
-    def __init__(self, omega=14.0, theta=0.5, epsilon=1.0, alpha=2.1):
-        super(AdaptiveWingLoss, self).__init__()
-        self.omega = omega
-        self.theta = theta
-        self.epsilon = epsilon
-        self.alpha = alpha
-        
-    def forward(self, pred, target):
-        diff = torch.abs(pred - target)
-        weight = torch.zeros_like(diff)
-        
-        A = self.omega * (1 / (1 + torch.pow(self.theta / self.epsilon, self.alpha - target))) * \
-            (self.alpha - target) * torch.pow(self.theta / self.epsilon, self.alpha - target - 1) * (1 / self.epsilon)
-        
-        C = self.theta * A - self.omega * torch.log(1 + torch.pow(self.theta / self.epsilon, self.alpha - target))
-        
-        case1_mask = (diff < self.theta).float()
-        case2_mask = (diff >= self.theta).float()
-        
-        loss = case1_mask * self.omega * torch.log(1 + torch.pow(diff / self.epsilon, self.alpha - target)) + \
-               case2_mask * (A * diff - C)
-               
         return loss.mean()
 
 class FaceAlignmentModel(pl.LightningModule):
@@ -62,8 +38,6 @@ class FaceAlignmentModel(pl.LightningModule):
             self.criterion = nn.MSELoss()
         elif loss_type == "wing":
             self.criterion = WingLoss()
-        elif loss_type == "adaptive_wing":
-            self.criterion = AdaptiveWingLoss()
         else:
             raise ValueError("Unsupported loss type")
         

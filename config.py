@@ -26,9 +26,8 @@ MODEL_TYPE = "resnet"
 
 EXPERIMENTS = [
     {"name": "resnet_mse", "model_type": "resnet", "loss_type": "mse"},
-    {"name": "resnet_wing", "model_type": "resnet", "loss_type": "wing"},
-    {"name": "efficientnet_mse", "model_type": "efficientnet", "loss_type": "wing"},
-    {"name": "efficientnet_wing", "model_type": "efficientnet", "loss_type": "adaptivewing"},
+    {"name": "efficientnet_wing", "model_type": "efficientnet", "loss_type": "wing"},
+    {"name": "efficientnet_mse", "model_type": "efficientnet", "loss_type": "mse"},
 ]
 
 OUTPUT_DIR = Path("outputs")
