@@ -26,7 +26,7 @@ MODEL_TYPE = "resnet"
 
 EXPERIMENTS = [
     {"name": "resnet_mse", "model_type": "resnet", "loss_type": "mse"},
-    {"name": "efficientnet_mse", "model_type": "efficientnet", "loss_type": "wing"},
+    {"name": "efficientnet_mse", "model_type": "efficientnet", "loss_type": "mse"},
     {"name": "efficientnet_wing", "model_type": "efficientnet", "loss_type": "adaptivewing"},
 ]
 
