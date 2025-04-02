@@ -19,7 +19,6 @@ class WingLoss(nn.Module):
                (1 - mask) * (diff - self.C)
         
         return loss.mean()
-        return loss.mean()
 
 class FaceAlignmentModel(pl.LightningModule):
     def __init__(self, model_type="resnet", loss_type="mse"):

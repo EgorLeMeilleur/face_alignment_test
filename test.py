@@ -15,22 +15,28 @@ def evaluate_model(model, loader):
     predictions = []
     gt = []
     normalizations = []
+    img_paths = []
     model.eval()
     with torch.no_grad():
         for batch in loader:
             images = batch["image"].to('cuda')
             landmarks = batch["landmarks"]
+            scale = batch["scale"]
             preds = model(images)
             for i in range(preds.shape[0]):
                 face_rect = batch["face_rect"][i].cpu().numpy()
-                pred_points = preds[i].cpu().numpy() + np.array([face_rect[0], face_rect[1]])
-                true_points = landmarks[i].cpu().numpy() + np.array([face_rect[0], face_rect[1]])
+                scale_i = scale[i].cpu().numpy()
+                pred_points = preds[i].cpu().numpy() * scale_i
+                pred_points = pred_points + np.array([face_rect[0], face_rect[1]])
+                true_points = landmarks[i].cpu().numpy() * scale_i
+                true_points = true_points + np.array([face_rect[0], face_rect[1]])
                 H = face_rect[3] - face_rect[1]
                 W = face_rect[2] - face_rect[0]
                 norm_factor = np.sqrt(H * W)
                 predictions.append(pred_points)
                 gt.append(true_points)
                 normalizations.append(norm_factor)
+
     return np.array(predictions), np.array(gt), np.array(normalizations)
 
 def evaluate_dlib(predictor, files, detector):
@@ -79,7 +85,7 @@ def main(args):
     results_path = Path(config.RESULTS_DIR)
     results_path.mkdir(parents=True, exist_ok=True)
     log_file =  results_path / f"auc_results_{args.experiment_name}.txt"
-    thresholds = np.linspace(0, config.MAX_ERROR_THRESHOLD, 100)
+    thresholds = np.linspace(0, 1, 100)
     for ds_name, folder in config.TEST_FOLDERS.items():
         files = []
         for ext in ["*.jpg", "*.png"]:
