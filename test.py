@@ -86,6 +86,7 @@ def main(args):
     results_path.mkdir(parents=True, exist_ok=True)
     log_file =  results_path / f"auc_results_{args.experiment_name}.txt"
     thresholds = np.linspace(0, 1, 100)
+    plot_thresholds = np.linspace(0, config.MAX_ERROR_THRESHOLD, 100)
     for ds_name, folder in config.TEST_FOLDERS.items():
         files = []
         for ext in ["*.jpg", "*.png"]:
@@ -100,10 +101,10 @@ def main(args):
         preds, gt, normalizations = evaluate_model(model, loader)
         ceds = count_ced(preds, gt, normalizations)
         ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-        auc_model = np.trapezoid(ced_curve, thresholds) / config.MAX_ERROR_THRESHOLD
+        auc_model = np.trapezoid(ced_curve, thresholds)
         
         plt.figure()
-        plt.plot(thresholds, ced_curve, label=f'{args.experiment_name} (AUC: {auc_model:.4f})')
+        plt.plot(plot_thresholds, ced_curve, label=f'{args.experiment_name} (AUC: {auc_model:.4f})')
         
         if ds_name.lower() == "menpo":
             try:
@@ -112,8 +113,8 @@ def main(args):
                 preds, gt, normalizations = evaluate_dlib(predictor, files, detector)
                 ceds = count_ced(preds, gt, normalizations)
                 ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-                auc_dlib = np.trapezoid(ced_curve, thresholds) / config.MAX_ERROR_THRESHOLD
-                plt.plot(thresholds, ced_curve, label=f'dlib (AUC: {auc_dlib:.4f})')
+                auc_dlib = np.trapezoid(ced_curve, thresholds)
+                plt.plot(plot_thresholds, ced_curve, label=f'dlib (AUC: {auc_dlib:.4f})')
                 print(f"{ds_name} dataset - dlib AUC: {auc_dlib:.4f}")
             except Exception as e:
                 print("Не удалось загрузить dlib shape predictor:", e)

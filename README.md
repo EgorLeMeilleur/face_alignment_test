@@ -5,9 +5,12 @@ This project implements a face alignment algorithm for detecting 68 facial landm
 ## Overview
 
 The following experiments are included:
-- **ResNet + MSE Loss**
+- **EfficientVit + Wing Loss**
+- **EfficientVit + MSE**
 - **EfficientNet + Wing Loss**
-- **EfficientNet + Adaptive Wing Loss**
+- **EfficientNet + MSE**
+- **ConvNext + Wing Loss**
+- **ConvNext + MSE**
 
 ## Data
 
@@ -43,8 +46,12 @@ To run all experiments, execute:
     python run_experiments.py
 
 This script trains and tests each experiment variant sequentially.
-After experiments are complete and the CED graphs have been generated, create a PDF report will be created
-The report will be saved in the outputs/reports directory.
+
+After experiments are complete and the CED graphs have been generated, you can create a PDF report with
+
+    python report_generation.py
+
+For generating report you need to download [fonts](https://fonts-online.ru/fonts/dejavu-sans/download) and unpack them to working folder
 
 TensorBoard
 

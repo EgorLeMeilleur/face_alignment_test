@@ -19,6 +19,31 @@ class WingLoss(nn.Module):
                (1 - mask) * (diff - self.C)
         
         return loss.mean()
+    
+class AdaptiveWingLoss(nn.Module):
+    def __init__(self, omega=14.0, theta=0.5, epsilon=1.0, alpha=2.1):
+        super(AdaptiveWingLoss, self).__init__()
+        self.omega = omega
+        self.theta = theta
+        self.epsilon = epsilon
+        self.alpha = alpha
+        
+    def forward(self, pred, target):
+        diff = torch.abs(pred - target)
+        
+        A = self.omega * (1 / (1 + torch.pow(self.theta / self.epsilon, self.alpha - target))) * \
+            (self.alpha - target) * torch.pow(self.theta / self.epsilon, self.alpha - target - 1) * (1 / self.epsilon)
+        
+        C = self.theta * A - self.omega * torch.log(1 + torch.pow(self.theta / self.epsilon, self.alpha - target))
+        
+        case1_mask = (diff < self.theta).float()
+        case2_mask = (diff >= self.theta).float()
+        
+        loss = case1_mask * self.omega * torch.log(1 + torch.pow(diff / self.epsilon, self.alpha - target)) + \
+               case2_mask * (A * diff - C)
+        
+        return loss.mean()
+
 
 class FaceAlignmentModel(pl.LightningModule):
     def __init__(self, model_type="resnet", loss_type="mse"):
@@ -26,10 +51,12 @@ class FaceAlignmentModel(pl.LightningModule):
         self.save_hyperparameters()
         self.loss_type = loss_type
         
-        if model_type == "resnet":
-            self.backbone = timm.create_model("resnet18", pretrained=True, num_classes=config.NUM_POINTS * 2)
+        if model_type == "efficientvit":
+            self.backbone = timm.create_model("efficientvit_m5", pretrained=True, num_classes=config.NUM_POINTS * 2)
         elif model_type == "efficientnet":
             self.backbone = timm.create_model("efficientnet_b0", pretrained=True, num_classes=config.NUM_POINTS * 2)
+        elif model_type == "convnext":
+            self.backbone = timm.create_model("convnextv2_nano", pretrained=True, num_classes=config.NUM_POINTS * 2)
         else:
             raise ValueError("Unsupported model type")
             
@@ -37,6 +64,8 @@ class FaceAlignmentModel(pl.LightningModule):
             self.criterion = nn.MSELoss()
         elif loss_type == "wing":
             self.criterion = WingLoss()
+        elif loss_type == "adaptive_wing":
+            self.criterion = AdaptiveWingLoss()
         else:
             raise ValueError("Unsupported loss type")
         

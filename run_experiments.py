@@ -20,5 +20,5 @@ if __name__ == "__main__":
     for exp in config.EXPERIMENTS:
         run_experiment(exp)
 
-    test_cmd = f"python report_generation.py"
-    subprocess.run(test_cmd, shell=True, check=True)
+    # test_cmd = f"python report_generation.py"
+    # subprocess.run(test_cmd, shell=True, check=True)

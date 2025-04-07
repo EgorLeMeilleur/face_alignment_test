@@ -31,8 +31,8 @@ def main(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE, choices=["resnet", "efficientnet"])
-    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, choices=["mse", "wing", "adaptivewing"])
+    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE, choices=["efficientvit", "efficientnet", "convnext"])
+    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, choices=["mse", "wing", "adaptive_wing"])
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
     main(args)
