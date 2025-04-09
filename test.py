@@ -56,8 +56,7 @@ def evaluate_dlib(predictor, files, detector):
         shape = predictor(image, face_rect)
         pred_points = np.array([[p.x, p.y] for p in shape.parts()])
         true_points = read_pts(file[1])
-        H = y2 - y1
-        W = x2 - x1
+        H, W = image.shape[:2]
         norm_factor = np.sqrt(H * W)
         predictions.append(pred_points)
         gt.append(true_points)
