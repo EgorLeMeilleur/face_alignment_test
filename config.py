@@ -16,13 +16,14 @@ NUM_WORKERS = 4
 LEARNING_RATE = 1e-3
 EPOCHS = 30
 IMAGE_SIZE = (224, 224)
+MEAN = [0.485, 0.456, 0.406]
+STD = [0.229, 0.224, 0.225]
 NUM_POINTS = 68
 TRAIN_VAL_SPLIT = 0.8
-CROP_EXPANSION = 5
+CROP_EXPANSION = 0.1
 MAX_ERROR_THRESHOLD = 0.08
-
-LOSS_TYPE = "mse"
-MODEL_TYPE = "resnet"
+HEATMAP_SIZE = 64
+SIGMA = 2.0
 
 EXPERIMENTS = [
     {"name": "efficientvit_mse", "model_type": "efficientvit", "loss_type": "mse"},

@@ -2,7 +2,9 @@ import argparse
 from pathlib import Path
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, random_split
+import torch
 import config
 from dataset import FaceLandmarksDataset, get_files
 from model import FaceAlignmentModel
@@ -20,14 +22,16 @@ def main(args):
     model = FaceAlignmentModel(model_type=args.model_type, loss_type=args.loss_type)
 
     logger = TensorBoardLogger(save_dir=str(config.LOG_DIR), name=args.experiment_name)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=str(config.CHECKPOINT_DIR),
+        filename=args.experiment_name + "-{epoch:02d}-{val_loss:.4f}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=1
+    )
     
-    trainer = pl.Trainer(max_epochs=config.EPOCHS, logger=logger)
+    trainer = pl.Trainer(max_epochs=config.EPOCHS, logger=logger, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader, val_loader)
-    
-    ckpt_path = Path(config.CHECKPOINT_DIR)
-    ckpt_path.mkdir(parents=True, exist_ok=True)
-    ckpt_file = ckpt_path / f"{args.experiment_name}.ckpt"
-    trainer.save_checkpoint(str(ckpt_file))
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

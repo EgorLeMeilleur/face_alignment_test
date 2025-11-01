@@ -9,33 +9,32 @@ import config
 from dataset import FaceLandmarksDataset, read_pts
 from model import FaceAlignmentModel
 import dlib
-import cv2
+from PIL import Image
 
-def evaluate_model(model, loader):
+@torch.no_grad()
+def evaluate_model(model, loader, device):
     predictions = []
     gt = []
     normalizations = []
-    img_paths = []
     model.eval()
-    with torch.no_grad():
-        for batch in loader:
-            images = batch["image"].to('cuda')
-            landmarks = batch["landmarks"]
-            scale = batch["scale"]
-            preds = model(images)
-            for i in range(preds.shape[0]):
-                face_rect = batch["face_rect"][i].cpu().numpy()
-                scale_i = scale[i].cpu().numpy()
-                pred_points = preds[i].cpu().numpy() * scale_i
-                pred_points = pred_points + np.array([face_rect[0], face_rect[1]])
-                true_points = landmarks[i].cpu().numpy() * scale_i
-                true_points = true_points + np.array([face_rect[0], face_rect[1]])
-                H = face_rect[3] - face_rect[1]
-                W = face_rect[2] - face_rect[0]
-                norm_factor = np.sqrt(H * W)
-                predictions.append(pred_points)
-                gt.append(true_points)
-                normalizations.append(norm_factor)
+
+    for batch in loader:
+        images = batch["image"].to(device)
+        landmarks = batch["landmarks"]
+        preds = model(images)
+        for i in range(preds.shape[0]):
+            face_rect = batch["face_rect"][i].cpu().numpy()
+            scale_i = scale[i].cpu().numpy()
+            pred_points = preds[i].cpu().numpy() * scale_i
+            pred_points = pred_points + np.array([face_rect[0], face_rect[1]])
+            true_points = landmarks[i].cpu().numpy() * scale_i
+            true_points = true_points + np.array([face_rect[0], face_rect[1]])
+            H = face_rect[3] - face_rect[1]
+            W = face_rect[2] - face_rect[0]
+            norm_factor = np.sqrt(H * W)
+            predictions.append(pred_points)
+            gt.append(true_points)
+            normalizations.append(norm_factor)
 
     return np.array(predictions), np.array(gt), np.array(normalizations)
 
@@ -44,8 +43,7 @@ def evaluate_dlib(predictor, files, detector):
     gt = []
     normalizations = []
     for file in files:
-        image = cv2.imread(file[0])
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.open(file[0])
         faces = detector(image)
         if len(faces) == 0:
             h, w = image.shape[:2]
@@ -81,6 +79,7 @@ def count_ced(predicted_points, gt_points, normalizations):
 
 
 def main(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     results_path = Path(config.RESULTS_DIR)
     results_path.mkdir(parents=True, exist_ok=True)
     log_file =  results_path / f"auc_results_{args.experiment_name}.txt"
@@ -96,8 +95,8 @@ def main(args):
         dataset = FaceLandmarksDataset(files, train=False)
         loader = DataLoader(dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
         
-        model = FaceAlignmentModel.load_from_checkpoint(args.checkpoint, map_location=torch.device('cuda'))
-        preds, gt, normalizations = evaluate_model(model, loader)
+        model = FaceAlignmentModel.load_from_checkpoint(args.checkpoint, map_location=device)
+        preds, gt, normalizations = evaluate_model(model, loader, device)
         ceds = count_ced(preds, gt, normalizations)
         ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
         auc_model = np.trapezoid(ced_curve, thresholds)
