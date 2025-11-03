@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import auc
 import config
 from dataset import FaceLandmarksDataset, read_pts
-from model import FaceAlignmentModel
+from models import FaceAlignmentModel
 import dlib
 from PIL import Image
 

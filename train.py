@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader, random_split
 import torch
 import config
 from dataset import FaceLandmarksDataset, get_files
-from model import FaceAlignmentModel
+from models import FaceAlignmentModel
 
-def main(args):
+def train(experiment_name, model_type, loss_type):
     files = get_files(config.TRAIN_FOLDERS)
     train_size = int(len(files) * config.TRAIN_VAL_SPLIT)
     train_files, val_files = random_split(files, [train_size, len(files) - train_size])
@@ -19,12 +19,12 @@ def main(args):
     train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS)
     val_loader = DataLoader(val_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
 
-    model = FaceAlignmentModel(model_type=args.model_type, loss_type=args.loss_type)
+    model = FaceAlignmentModel(model_type=model_type, loss_type=loss_type)
 
-    logger = TensorBoardLogger(save_dir=str(config.LOG_DIR), name=args.experiment_name)
+    logger = TensorBoardLogger(save_dir=str(config.LOG_DIR), name=experiment_name)
     checkpoint_callback = ModelCheckpoint(
         dirpath=str(config.CHECKPOINT_DIR),
-        filename=args.experiment_name + "-{epoch:02d}-{val_loss:.4f}",
+        filename=experiment_name + "-{epoch:02d}-{val_loss:.4f}",
         monitor="val_loss",
         mode="min",
         save_top_k=1
@@ -39,4 +39,4 @@ if __name__ == "__main__":
     parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, choices=["mse", "wing", "adaptive_wing"])
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
-    main(args)
+    train(args.experiment_name, args.model_type, args.loss_type)

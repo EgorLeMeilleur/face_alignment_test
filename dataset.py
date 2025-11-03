@@ -71,11 +71,15 @@ def get_transforms(train=True):
             A.ToGray(p=0.1),
             A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=15, p=0.3),
             A.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.05, p=0.3),
-            A.Normalize(mean=config.MEAN, std=config.STD)])
+            A.Normalize(mean=config.MEAN, std=config.STD)],
+            keypoint_params=A.KeypointParams(format='xy', remove_invisible=False)
+        )
     else:
         return A.Compose([
             A.Resize(config.IMAGE_SIZE, config.IMAGE_SIZE),
-            A.Normalize(mean=config.MEAN, std=config.STD)])
+            A.Normalize(mean=config.MEAN, std=config.STD)],
+            keypoint_params=A.KeypointParams(format='xy', remove_invisible=False)
+        )
 
 class FaceLandmarksDataset(Dataset):
     def __init__(self, files, train=True):
@@ -88,62 +92,93 @@ class FaceLandmarksDataset(Dataset):
         self.hm_h = config.HEATMAP_SIZE
         self.hm_w = config.HEATMAP_SIZE
         self.sigma = config.SIGMA
+        self.crop_expansion = config.CROP_EXPANSION
 
     def __len__(self):
         return len(self.samples)
     
     def __getitem__(self, idx):
         img_path, pts_path = self.samples[idx]
-        image = Image.open(img_path)
-        
-        rect = self._get_face_rect(image)
-        x1, y1, x2, y2 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        pil_image = Image.open(img_path).convert('RGB')
+        image = np.array(pil_image)  # H_orig, W_orig, C
+        H_orig, W_orig = image.shape[:2]
 
-        landmarks = read_pts(str(pts_path))
+        # read GT
+        landmarks = read_pts(str(pts_path))  # (K,2)
 
-        landmarks_x_max = landmarks[:, 0].max()
-        landmarks_y_max = landmarks[:, 1].max()
+        # dlib face rect expects numpy RGB
+        faces = self.detector(image, 1)
+        if len(faces) == 0:
+            face_rect = dlib.rectangle(0, 0, W_orig - 1, H_orig - 1)
+        else:
+            face_rect = faces[0]
+        x1, y1, x2, y2 = face_rect.left(), face_rect.top(), face_rect.right(), face_rect.bottom()
 
-        landmarks_x_min = landmarks[:, 0].min()
-        landmarks_y_min = landmarks[:, 1].min()
+        # expand to include annotated points
+        x1_face = int(min(x1, float(landmarks[:,0].min())))
+        x2_face = int(max(x2, float(landmarks[:,0].max())))
+        y1_face = int(min(y1, float(landmarks[:,1].min())))
+        y2_face = int(max(y2, float(landmarks[:,1].max())))
 
-        x1_face_rectangle = int(min(x1, landmarks_x_min))
-        x2_face_rectangle = int(max(x2, landmarks_x_max))
-        y1_face_rectangle = int(min(y1, landmarks_y_min))
-        y2_face_rectangle = int(max(y2, landmarks_y_max))
+        # expansion either fraction of box or px
+        if self.crop_expansion < 1.0:
+            x_exp = int(self.crop_expansion * (x2_face - x1_face + 1))
+            y_exp = int(self.crop_expansion * (y2_face - y1_face + 1))
+        else:
+            x_exp = int(self.crop_expansion)
+            y_exp = int(self.crop_expansion)
 
-        x_expansion = config.CROP_EXPANSION * image.shape[1]
-        y_expansion = config.CROP_EXPANSION * image.shape[0]
+        x1_exp = max(0, x1_face - x_exp)
+        y1_exp = max(0, y1_face - y_exp)
+        x2_exp = min(W_orig - 1, x2_face + x_exp)
+        y2_exp = min(H_orig - 1, y2_face + y_exp)
 
-        x1_expanded = max(0, x1_face_rectangle - x_expansion)
-        y1_expanded = max(0, y1_face_rectangle - y_expansion)
-        x2_expanded = min(image.shape[1], x2_face_rectangle + x_expansion)
-        y2_expanded = min(image.shape[0], y2_face_rectangle + y_expansion)
+        # crop inclusive [y1:y2+1, x1:x2+1]
+        face_crop = image[y1_exp:y2_exp+1, x1_exp:x2_exp+1].copy()
+        crop_h, crop_w = face_crop.shape[:2]
 
-        face_crop = image[y1_expanded:y2_expanded, x1_expanded:x2_expanded]
+        # shift landmarks to crop coords
+        landmarks_crop = landmarks - np.array([x1_exp, y1_exp], dtype=np.float32)
 
-        landmarks_crop = landmarks - np.array([x1_expanded, y1_expanded])
+        # prepare keypoints list for albumentations
+        keypoints_list = [ (float(x), float(y)) for x,y in landmarks_crop ]
 
-        transformed = self.transform(image=face_crop, keypoints=landmarks_crop)
-        transformed_image = transformed['image']
-        transformed_landmarks = transformed['keypoints']
+        augmented = self.transform(image=face_crop, keypoints=keypoints_list)
+        transformed_image = augmented['image']  # H_resized, W_resized, C (float32 if Normalize)
+        transformed_kps = np.array(augmented['keypoints'], dtype=np.float32)  # (K,2) in resized coords
+        resized_h, resized_w = transformed_image.shape[:2]
 
-        normalized_landmarks = transformed_landmarks / np.array([image.size[1], image.size[0]])
-        heatmaps = make_heatmaps(transformed_landmarks, heatmap_size=(self.hm_h, self.hm_w), image_size=(self.img_h, self.img_w), sigma=self.sigma)
-        
-        img_tensor = torch.tensor(transformed_image, dtype=torch.float32).permute(2, 0, 1)
-        kps_px_tensor = torch.tensor(transformed_landmarks, dtype=torch.float32)
-        kps_norm_tensor = torch.tensor(normalized_landmarks, dtype=torch.float32)
-        heatmap_tensor = torch.tensor(heatmaps, dtype=torch.float32) if heatmaps is not None else None
+        # compute scale from resized -> crop (pixels)
+        # scale_x such that x_resized * scale_x = x_in_crop_pixels
+        scale_x = float(crop_w) / float(resized_w) if resized_w > 0 else 1.0
+        scale_y = float(crop_h) / float(resized_h) if resized_h > 0 else 1.0
+
+        # normalized keypoints relative to resized image in [0,1]
+        kps_norm = transformed_kps.copy()
+        mask_vis = (kps_norm[:,0] >= 0) & (kps_norm[:,1] >= 0)
+        if resized_w > 0 and resized_h > 0:
+            kps_norm[mask_vis, 0] = kps_norm[mask_vis, 0] / float(resized_w)
+            kps_norm[mask_vis, 1] = kps_norm[mask_vis, 1] / float(resized_h)
+        kps_norm[~mask_vis] = -1.0
+
+        # generate heatmaps using resized image size (important!)
+        heatmaps = make_heatmaps(transformed_kps, heatmap_size=(self.hm_h, self.hm_w), image_size=(resized_h, resized_w), sigma=self.sigma)
+
+        # tensors
+        img_tensor = torch.tensor(transformed_image, dtype=torch.float32).permute(2,0,1)
+        kps_px_tensor = torch.tensor(transformed_kps, dtype=torch.float32)
+        kps_norm_tensor = torch.tensor(kps_norm, dtype=torch.float32)
+        heatmap_tensor = torch.tensor(heatmaps, dtype=torch.float32)
 
         sample = {
-            "image": img_tensor,
-            "keypoints_px": kps_px_tensor,
-            "keypoints_norm": kps_norm_tensor,
-            "heatmaps": heatmap_tensor,
-            "crop_box": torch.tensor([x1_expanded, y1_expanded, x2_expanded, y2_expanded], dtype=torch.int32),
-            "scale_unnorm": torch.tensor(([image.size[1], image.size[0]]), dtype=torch.float32),
-            "orig_size": torch.tensor(image.size, dtype=torch.int32)
+            "image": img_tensor,                                # C,H_resized,W_resized
+            "keypoints_px": kps_px_tensor,                      # K,2 in resized px (-1 if invisible)
+            "keypoints_norm": kps_norm_tensor,                  # K,2 in [0,1] w.r.t resized
+            "heatmaps": heatmap_tensor,                         # K,H_hm,W_hm
+            "crop_box": torch.tensor([x1_exp, y1_exp, x2_exp, y2_exp], dtype=torch.int32),
+            "scale": torch.tensor([scale_x, scale_y], dtype=torch.float32),
+            "face_rect": torch.tensor([x1, y1, x2, y2], dtype=torch.int32),
+            "orig_size": torch.tensor([H_orig, W_orig], dtype=torch.int32)
         }
 
         return sample
