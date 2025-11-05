@@ -9,7 +9,7 @@ import config
 from dataset import FaceLandmarksDataset, get_files
 from models import FaceAlignmentModel
 
-def train(experiment_name, model_type, loss_type):
+def train(experiment_name, model_type, loss_type, head_type):
     files = get_files(config.TRAIN_FOLDERS)
     train_size = int(len(files) * config.TRAIN_VAL_SPLIT)
     train_files, val_files = random_split(files, [train_size, len(files) - train_size])
@@ -19,7 +19,7 @@ def train(experiment_name, model_type, loss_type):
     train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS)
     val_loader = DataLoader(val_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
 
-    model = FaceAlignmentModel(model_type=model_type, loss_type=loss_type)
+    model = FaceAlignmentModel(backbone_name=model_type, head_type=head_type, loss_type=loss_type)
 
     logger = TensorBoardLogger(save_dir=str(config.LOG_DIR), name=experiment_name)
     checkpoint_callback = ModelCheckpoint(

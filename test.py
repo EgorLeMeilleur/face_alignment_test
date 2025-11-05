@@ -10,57 +10,55 @@ from dataset import FaceLandmarksDataset, read_pts
 from models import FaceAlignmentModel
 import dlib
 from PIL import Image
+import csv
 
-@torch.no_grad()
-def evaluate_model(model, loader, device):
-    predictions = []
-    gt = []
-    normalizations = []
-    model.eval()
+def heatmaps_to_peaks(hm_numpy):
+    if hm_numpy.ndim == 4:
+        B = hm_numpy.shape[0]
+        res = []
+        for b in range(B):
+            res.append(heatmaps_to_peaks(hm_numpy[b]))
+        return res
+    K, Hh, Wh = hm_numpy.shape
+    peaks = np.zeros((K, 2), dtype=np.float32)
+    for k in range(K):
+        idx = hm_numpy[k].argmax()
+        y = idx // Wh
+        x = idx % Wh
+        peaks[k, 0] = float(x)
+        peaks[k, 1] = float(y)
+    return peaks
 
-    for batch in loader:
-        images = batch["image"].to(device)
-        landmarks = batch["landmarks"]
-        preds = model(images)
-        for i in range(preds.shape[0]):
-            face_rect = batch["face_rect"][i].cpu().numpy()
-            scale_i = scale[i].cpu().numpy()
-            pred_points = preds[i].cpu().numpy() * scale_i
-            pred_points = pred_points + np.array([face_rect[0], face_rect[1]])
-            true_points = landmarks[i].cpu().numpy() * scale_i
-            true_points = true_points + np.array([face_rect[0], face_rect[1]])
-            H = face_rect[3] - face_rect[1]
-            W = face_rect[2] - face_rect[0]
-            norm_factor = np.sqrt(H * W)
-            predictions.append(pred_points)
-            gt.append(true_points)
-            normalizations.append(norm_factor)
+def map_resized_to_orig(coords_resized, crop_box, scale):
+    x1, y1 = float(crop_box[0]), float(crop_box[1])
+    sx, sy = float(scale[0]), float(scale[1])
+    coords_orig = np.zeros_like(coords_resized, dtype=np.float32)
+    coords_orig[:, 0] = coords_resized[:, 0] * sx + x1
+    coords_orig[:, 1] = coords_resized[:, 1] * sy + y1
+    return coords_orig
 
-    return np.array(predictions), np.array(gt), np.array(normalizations)
+def map_hm_to_resized(peaks_hm, resized_size, hm_size):
+    H_resized, W_resized = int(resized_size[0]), int(resized_size[1])
+    H_hm, W_hm = int(hm_size[0]), int(hm_size[1])
+    coords_resized = np.zeros_like(peaks_hm, dtype=np.float32)
+    coords_resized[:, 0] = peaks_hm[:, 0] * (W_resized / float(W_hm))
+    coords_resized[:, 1] = peaks_hm[:, 1] * (H_resized / float(H_hm))
+    return coords_resized
 
-def evaluate_dlib(predictor, files, detector):
-    predictions = []
-    gt = []
-    normalizations = []
-    for file in files:
-        image = Image.open(file[0])
-        faces = detector(image)
-        if len(faces) == 0:
-            h, w = image.shape[:2]
-            face_rect = dlib.rectangle(0, 0, w, h)
-        else:
-            face_rect = faces[0]
-        x1, y1, x2, y2 = face_rect.left(), face_rect.top(), face_rect.right(), face_rect.bottom()
-        shape = predictor(image, face_rect)
-        pred_points = np.array([[p.x, p.y] for p in shape.parts()])
-        true_points = read_pts(file[1])
-        H, W = image.shape[:2]
-        norm_factor = np.sqrt(H * W)
-        predictions.append(pred_points)
-        gt.append(true_points)
-        normalizations.append(norm_factor)
-    return np.array(predictions), np.array(gt), np.array(normalizations)
+def compute_nme_one(pred_points, gt_points, face_rect):
+    dists = np.linalg.norm(pred_points - gt_points, axis=1)
+    mean_px = float(np.mean(dists))
+    H = float(face_rect[3] - face_rect[1])
+    W = float(face_rect[2] - face_rect[0])
+    norm = np.sqrt(max(1.0, H * W))
+    return mean_px / norm
 
+def ced_and_auc(nmes, T=config.MAX_ERROR_THRESHOLD, num=200):
+    thr = np.linspace(0.0, T, num)
+    ced = np.array([np.mean(nmes < t) for t in thr])
+    auc_raw = np.trapz(ced, thr)
+    auc_norm = auc_raw / T
+    return thr, ced, auc_raw, auc_norm
 def count_ced(predicted_points, gt_points, normalizations):
     ceds = []
     for preds, gts, normalization in zip(predicted_points, gt_points, normalizations):
@@ -77,63 +75,169 @@ def count_ced(predicted_points, gt_points, normalizations):
 
     return ceds
 
+@torch.no_grad()
+def evaluate_model(model, loader, device):
+    model.to(device)
+    model.eval()
 
-def main(args):
+    all_preds = []
+    all_gts = []
+    all_nms = []
+    for batch in loader:
+        imgs = batch["image"].to(device)
+        B = imgs.shape[0]
+        out = model(imgs)
+        for i in range(B):
+            face_rect = batch["face_rect"][i].cpu().numpy()
+            crop_box = batch.get("crop_box", None)
+            scale = batch.get("scale", None)
+            if crop_box is None or scale is None:
+                resized_h, resized_w = imgs.shape[2], imgs.shape[3]
+                crop_box = np.array([0, 0, resized_w - 1, resized_h - 1], dtype=np.float32)
+                scale = np.array([1.0, 1.0], dtype=np.float32)
+            else:
+                crop_box = crop_box[i].cpu().numpy()
+                scale = scale[i].cpu().numpy()
+
+            resized_h, resized_w = imgs.shape[2], imgs.shape[3]
+            kps_norm = batch["keypoints_norm"][i].cpu().numpy()
+            kps_px = np.zeros_like(kps_norm)
+            kps_px[:,0] = kps_norm[:,0] * float(resized_w)
+            kps_px[:,1] = kps_norm[:,1] * float(resized_h)
+            gt_orig = map_resized_to_orig(kps_px, crop_box, scale)
+
+            if out.dim() == 3:
+                pred_i = out[i].detach().cpu().numpy()
+                pred_px = np.zeros_like(pred_i)
+                pred_px[:,0] = pred_i[:,0] * float(resized_w)
+                pred_px[:,1] = pred_i[:,1] * float(resized_h)
+                pred_orig = map_resized_to_orig(pred_px, crop_box, scale)
+
+            elif out.dim() == 4:
+                hm = torch.nn.funnctional.sigmoid(out[i]).detach().cpu().numpy()
+                peaks_hm = heatmaps_to_peaks(hm)
+                coords_resized = map_hm_to_resized(peaks_hm, (resized_h, resized_w), (hm.shape[1], hm.shape[2]))
+                pred_orig = map_resized_to_orig(coords_resized, crop_box, scale)
+
+            all_preds.append(pred_orig)
+            all_gts.append(gt_orig)
+            Hf = float(face_rect[3] - face_rect[1])
+            Wf = float(face_rect[2] - face_rect[0])
+            all_nms.append(np.sqrt(max(1.0, Hf * Wf)))
+
+    return np.array(all_preds), np.array(all_gts), np.array(all_nms)
+
+def evaluate_dlib(predictor, files, detector):
+    preds = []
+    gts = []
+    norms = []
+    for img_path, pts_path in files:
+        pil = Image.open(img_path).convert("RGB")
+        img_np = np.array(pil)
+        faces = detector(img_np, 1)
+        if len(faces) == 0:
+            h, w = img_np.shape[:2]
+            face_rect = dlib.rectangle(0, 0, w - 1, h - 1)
+        else:
+            face_rect = faces[0]
+        shape = predictor(img_np, face_rect)
+        pred_points = np.array([[p.x, p.y] for p in shape.parts()], dtype=np.float32)
+        true_points = read_pts(str(pts_path))
+        H = float(face_rect.bottom() - face_rect.top())
+        W = float(face_rect.right() - face_rect.left())
+        norm = np.sqrt(max(1.0, H * W))
+        preds.append(pred_points)
+        gts.append(true_points)
+        norms.append(norm)
+    return np.array(preds), np.array(gts), np.array(norms)
+
+def test(checkpoint, experiment_name):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     results_path = Path(config.RESULTS_DIR)
     results_path.mkdir(parents=True, exist_ok=True)
-    log_file =  results_path / f"auc_results_{args.experiment_name}.txt"
-    thresholds = np.linspace(0, 1, 100)
-    plot_thresholds = np.linspace(0, config.MAX_ERROR_THRESHOLD, 100)
+
+    model = FaceAlignmentModel.load_from_checkpoint(checkpoint, map_location=device)
+    model.to(device)
+    model.eval()
+
     for ds_name, folder in config.TEST_FOLDERS.items():
+        print("Evaluating dataset:", ds_name)
         files = []
-        for ext in ["*.jpg", "*.png"]:
+        folder = Path(folder)
+        for ext in ["*.jpg", "*.png", "*.jpeg"]:
             for img_path in folder.glob(ext):
                 pts_path = img_path.with_suffix(".pts")
-                if pts_path.exists() and len(read_pts(str(pts_path))) == 68:
-                    files.append((img_path, pts_path))
+                if pts_path.exists():
+                    try:
+                        pts = read_pts(str(pts_path))
+                        if pts.shape[0] == config.NUM_POINTS:
+                            files.append((img_path, pts_path))
+                    except Exception:
+                        continue
+        if len(files) == 0:
+            print(f"No files found for {ds_name} in {folder}; skipping.")
+            continue
+
         dataset = FaceLandmarksDataset(files, train=False)
         loader = DataLoader(dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
-        
-        model = FaceAlignmentModel.load_from_checkpoint(args.checkpoint, map_location=device)
-        preds, gt, normalizations = evaluate_model(model, loader, device)
-        ceds = count_ced(preds, gt, normalizations)
-        ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-        auc_model = np.trapezoid(ced_curve, thresholds)
-        
-        plt.figure()
-        plt.plot(plot_thresholds, ced_curve, label=f'{args.experiment_name} (AUC: {auc_model:.4f})')
-        
+
+        print("Running model predictions...")
+        preds, gts, norms = evaluate_model(model, loader, device)
+        n_images = preds.shape[0]
+        print(f"Got predictions for {n_images} images")
+
+        nmes = []
+        for p, g, nrm in zip(preds, gts, norms):
+            dists = np.linalg.norm(p - g, axis=1)
+            nme = float(np.mean(dists) / float(nrm))
+            nmes.append(nme)
+        nmes = np.array(nmes)
+
+        thr, ced, auc_raw, auc_norm = ced_and_auc(nmes, T=config.MAX_ERROR_THRESHOLD, num=200)
+        auc_msg = f"AUC_raw={auc_raw:.6f}, AUC_norm={auc_norm:.6f}"
+        print(f"{ds_name} model AUC (0..{config.MAX_ERROR_THRESHOLD}): {auc_msg}")
+
+        plt.figure(figsize=(6,4))
+        plt.plot(thr, ced, label=f'{experiment_name} (AUC={auc_norm:.4f})')
+
         if ds_name.lower() == "menpo":
             try:
                 predictor = dlib.shape_predictor("data/shape_predictor_68_face_landmarks.dat")
                 detector = dlib.get_frontal_face_detector()
-                preds, gt, normalizations = evaluate_dlib(predictor, files, detector)
-                ceds = count_ced(preds, gt, normalizations)
-                ced_curve = np.array([np.mean(ceds < thr) for thr in thresholds])
-                auc_dlib = np.trapezoid(ced_curve, thresholds)
-                plt.plot(plot_thresholds, ced_curve, label=f'dlib (AUC: {auc_dlib:.4f})')
-                print(f"{ds_name} dataset - dlib AUC: {auc_dlib:.4f}")
+                print("Running dlib baseline...")
+                d_preds, d_gts, d_norms = evaluate_dlib(predictor, files, detector)
+                d_nmes = np.array([float(np.mean(np.linalg.norm(dp - dg, axis=1)) / float(nrm)) for dp, dg, nrm in zip(d_preds, d_gts, d_norms)])
+                thr_d, ced_d, auc_raw_d, auc_norm_d = ced_and_auc(d_nmes, T=config.MAX_ERROR_THRESHOLD, num=200)
+                plt.plot(thr_d, ced_d, label=f'dlib (AUC={auc_norm_d:.4f})')
+                print(f"{ds_name} dlib AUC_norm: {auc_norm_d:.6f}")
             except Exception as e:
-                print("Не удалось загрузить dlib shape predictor:", e)
-        
-        plt.xlabel('Normalized Mean Square Error')
-        plt.ylabel('Percentage of Images')
-        plt.title(f'CED Curve on {ds_name} dataset')
+                print("Failed to evaluate dlib baseline:", e)
+
+        plt.xlabel("Normalized mean error")
+        plt.ylabel("Fraction of images")
+        plt.title(f"CED on {ds_name}")
+        plt.xlim(0, config.MAX_ERROR_THRESHOLD)
+        plt.ylim(0, 1.0)
         plt.legend()
-        
-        plot_file = results_path / f"CED_{ds_name}_{args.experiment_name}.png"
-        plt.savefig(str(plot_file))
+        out_png = Path(config.RESULTS_DIR) / f"CED_{ds_name}_{args.experiment_name}.png"
+        plt.savefig(out_png, dpi=150)
         plt.close()
 
-        with open(log_file, "a") as f:
-            f.write(f"{ds_name}, AUC: {auc_model:.4f}\n")
-        
-        print(f"{ds_name} dataset - Model AUC: {auc_model:.4f}")
+        with open(results_path / f"auc_results_{args.experiment_name}.txt", "a") as f:
+            f.write(f"{ds_name}, AUC_raw: {auc_raw:.6f}, AUC_norm: {auc_norm:.6f}\n")
+
+        csv_out = results_path / f"nme_{ds_name}_{args.experiment_name}.csv"
+        with open(csv_out, "w", newline="") as csvf:
+            writer = csv.writer(csvf)
+            writer.writerow(["image_idx", "nme"])
+            for i, nm in enumerate(nmes):
+                writer.writerow([i, float(nm)])
+
+        print(f"Saved CED plot and CSV for {ds_name}. Model AUC_norm: {auc_norm:.6f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
-    main(args)
+    test(args.checkpoint, args.experiment_name)

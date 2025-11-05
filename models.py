@@ -22,9 +22,14 @@ class FaceAlignmentModel(pl.LightningModule):
         self.backbone_name = backbone_name
 
         self.backbone = timm.create_model(backbone_name, pretrained=True, features_only=True, in_chans=3)
-        feature_info = self.backbone.feature_info
-        last_info = feature_info.info_list[-1]
-        in_channels = last_info['num_chs']
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, self.img_h, self.img_w)
+            feats = self.backbone(dummy)
+            if isinstance(feats, (list, tuple)):
+                last_feat = feats[-1]
+            else:
+                last_feat = feats
+            in_channels = int(last_feat.shape[1])
 
         if self.head_type == "regression":
             self.pool = nn.AdaptiveAvgPool2d(1)
@@ -68,7 +73,7 @@ class FaceAlignmentModel(pl.LightningModule):
 
     def forward(self, x):
         if self.head_type == "regression":
-            feats = self.backbone(x)
+            feats = self.backbone(x)[-1]
             pooled = self.pool(feats)
             out = self.regressor(pooled)
             out = out.view(-1, self.num_points, 2)
