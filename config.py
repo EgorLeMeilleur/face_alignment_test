@@ -12,7 +12,6 @@ TEST_FOLDERS = {
 }
 
 BATCH_SIZE = 128
-NUM_WORKERS = 4
 LEARNING_RATE = 1e-3
 EPOCHS = 30
 IMAGE_SIZE = 224
@@ -39,3 +38,8 @@ LOG_DIR = OUTPUT_DIR / "logs"
 CHECKPOINT_DIR = OUTPUT_DIR / "checkpoints"
 RESULTS_DIR = OUTPUT_DIR / "results"
 REPORT_DIR = OUTPUT_DIR / "reports"
+
+MODEL_TYPE = 'efficientnet_b0'
+HEAD_TYPE = 'regression'
+LOSS_TYPE = 'mse'
+NUM_WORKERS = 10

@@ -8,6 +8,8 @@ import torch
 import config
 from dataset import FaceLandmarksDataset, get_files
 from models import FaceAlignmentModel
+torch.backends.cudnn.benchmark = True
+torch.set_float32_matmul_precision('medium')
 
 def train(experiment_name, model_type, loss_type, head_type):
     files = get_files(config.TRAIN_FOLDERS)
@@ -15,9 +17,26 @@ def train(experiment_name, model_type, loss_type, head_type):
     train_files, val_files = random_split(files, [train_size, len(files) - train_size])
     train_dataset = FaceLandmarksDataset(train_files, train=True)
     val_dataset = FaceLandmarksDataset(val_files, train=False)
+
+    print(len(train_dataset), len(val_dataset))
     
-    train_loader = DataLoader(train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=config.NUM_WORKERS)
-    val_loader = DataLoader(val_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=True
+    )
+
 
     model = FaceAlignmentModel(backbone_name=model_type, head_type=head_type, loss_type=loss_type)
 
@@ -35,8 +54,9 @@ def train(experiment_name, model_type, loss_type, head_type):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE, choices=["efficientvit", "efficientnet", "convnext"])
-    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, choices=["mse", "wing", "adaptive_wing"])
+    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE)
+    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE)
+    parser.add_argument("--head_type", type=str, default=config.HEAD_TYPE)
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
-    train(args.experiment_name, args.model_type, args.loss_type)
+    train(args.experiment_name, args.model_type, args.loss_type, args.head_type)

@@ -162,19 +162,19 @@ class FaceLandmarksDataset(Dataset):
         kps_norm[~mask_vis] = -1.0
 
         # generate heatmaps using resized image size (important!)
-        heatmaps = make_heatmaps(transformed_kps, heatmap_size=(self.hm_h, self.hm_w), image_size=(resized_h, resized_w), sigma=self.sigma)
+        # heatmaps = make_heatmaps(transformed_kps, heatmap_size=(self.hm_h, self.hm_w), image_size=(resized_h, resized_w), sigma=self.sigma)
 
         # tensors
         img_tensor = torch.tensor(transformed_image, dtype=torch.float32).permute(2,0,1)
         kps_px_tensor = torch.tensor(transformed_kps, dtype=torch.float32)
         kps_norm_tensor = torch.tensor(kps_norm, dtype=torch.float32)
-        heatmap_tensor = torch.tensor(heatmaps, dtype=torch.float32)
+        # heatmap_tensor = torch.tensor(heatmaps, dtype=torch.float32)
 
         sample = {
             "image": img_tensor,                                # C,H_resized,W_resized
             "keypoints_px": kps_px_tensor,                      # K,2 in resized px (-1 if invisible)
             "keypoints_norm": kps_norm_tensor,                  # K,2 in [0,1] w.r.t resized
-            "heatmaps": heatmap_tensor,                         # K,H_hm,W_hm
+            # "heatmaps": heatmap_tensor,                         # K,H_hm,W_hm
             "crop_box": torch.tensor([x1_exp, y1_exp, x2_exp, y2_exp], dtype=torch.int32),
             "scale": torch.tensor([scale_x, scale_y], dtype=torch.float32),
             "face_rect": torch.tensor([x1, y1, x2, y2], dtype=torch.int32),
