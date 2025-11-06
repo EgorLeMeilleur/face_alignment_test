@@ -8,8 +8,6 @@ import torch
 import config
 from dataset import FaceLandmarksDataset, get_files
 from models import FaceAlignmentModel
-torch.backends.cudnn.benchmark = True
-torch.set_float32_matmul_precision('medium')
 
 def train(experiment_name, model_type, loss_type, head_type):
     files = get_files(config.TRAIN_FOLDERS)
@@ -17,8 +15,6 @@ def train(experiment_name, model_type, loss_type, head_type):
     train_files, val_files = random_split(files, [train_size, len(files) - train_size])
     train_dataset = FaceLandmarksDataset(train_files, train=True)
     val_dataset = FaceLandmarksDataset(val_files, train=False)
-
-    print(len(train_dataset), len(val_dataset))
     
     train_loader = DataLoader(
         train_dataset,
@@ -38,12 +34,12 @@ def train(experiment_name, model_type, loss_type, head_type):
     )
 
 
-    model = FaceAlignmentModel(backbone_name=model_type, head_type=head_type, loss_type=loss_type)
+    model = FaceAlignmentModel(model_type=model_type, head_type=head_type, loss_type=loss_type)
 
     logger = TensorBoardLogger(save_dir=str(config.LOG_DIR), name=experiment_name)
     checkpoint_callback = ModelCheckpoint(
         dirpath=str(config.CHECKPOINT_DIR),
-        filename=experiment_name + "-{epoch:02d}-{val_loss:.4f}",
+        filename=experiment_name,
         monitor="val_loss",
         mode="min",
         save_top_k=1

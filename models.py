@@ -3,102 +3,73 @@ import torch.nn as nn
 import pytorch_lightning as pl
 import timm
 import config
-from losses import WingLoss, AdaptiveWingLoss, HeatmapFocalLoss
-
+from models_utils import WingLoss, AdaptiveWingLoss, HeatmapFocalLoss, HeatmapHead
 class FaceAlignmentModel(pl.LightningModule):
-    def __init__(self, backbone_name: str = "efficientnet_b0", head_type: str = "regression", loss_type: str = "mse"):
+    def __init__(self, model_type: str = "efficientnet", head_type: str = "regression", loss_type: str = "mse"):
         super().__init__()
-        self.save_hyperparameters()
 
         self.num_points = config.NUM_POINTS
         self.img_size = (config.IMAGE_SIZE, config.IMAGE_SIZE)
         self.img_h, self.img_w = int(self.img_size[0]), int(self.img_size[1])
         hm_def = (config.HEATMAP_SIZE, config.HEATMAP_SIZE)
         self.hm_h, self.hm_w = int(hm_def[0]), int(hm_def[1])
-        self.lr = 1e-3
+        self.lr = config.LEARNING_RATE
 
         self.head_type = head_type
         self.loss_type = loss_type
-        self.backbone_name = backbone_name
+        
+        if model_type == "efficientnet":
+            self.backbone = timm.create_model("efficientnet_b0", pretrained=True, features_only=True, in_chans=3)
+        elif model_type == "convnext":
+            self.backbone = timm.create_model("convnextv2_nano", pretrained=True, features_only=True, in_chans=3)
 
-        self.backbone = timm.create_model(backbone_name, pretrained=True, features_only=True, in_chans=3)
-        with torch.no_grad():
-            dummy = torch.zeros(1, 3, self.img_h, self.img_w)
-            feats = self.backbone(dummy)
-            if isinstance(feats, (list, tuple)):
-                last_feat = feats[-1]
-            else:
-                last_feat = feats
-            in_channels = int(last_feat.shape[1])
+        in_ch_last = self.backbone.feature_info.channels()[-1]
 
         if self.head_type == "regression":
             self.pool = nn.AdaptiveAvgPool2d(1)
             self.regressor = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(in_channels, in_channels // 2 if in_channels >= 64 else in_channels),
+                nn.Linear(in_ch_last, in_ch_last // 2 if in_ch_last >= 64 else in_ch_last),
                 nn.ReLU(inplace=True),
                 nn.Dropout(0.25),
-                nn.Linear(in_channels // 2 if in_channels >= 64 else in_channels, self.num_points * 2)
+                nn.Linear(in_ch_last // 2 if in_ch_last >= 64 else in_ch_last, self.num_points * 2)
             )
             if loss_type == "mse":
-                self.criterion = nn.MSELoss(reduction='none')
+                self.criterion = nn.MSELoss(reduction='mean')
             elif loss_type == "wing":
                 self.criterion = WingLoss()
-            elif loss_type == "adaptive_wing":
+            elif loss_type == "awing":
                 self.criterion = AdaptiveWingLoss()
 
         elif self.head_type == "heatmap":
-            self.upsample_head = self._make_upsample_head(in_channels, self.num_points, target_size=(self.hm_h, self.hm_w))
+            self.heatmap_head = HeatmapHead(in_channels=in_ch_last, num_points=self.num_points, hm_h=self.hm_h, hm_w=self.hm_w)
+
             if loss_type == "mse":
-                self.criterion = nn.MSELoss()
+                self.criterion = nn.MSELoss(reduction='mean')
             elif loss_type == "focal":
                 self.criterion = HeatmapFocalLoss()
-            else:
-                raise ValueError(f"Unsupported loss_type for heatmap: {loss_type}")
-        else:
-            raise ValueError("Unsupported head_type: choose 'regression' or 'heatmap'")
-
-    def _make_upsample_head(self, in_ch, out_ch, target_size=(64,64)):
-        layers = []
-        layers.append(nn.Conv2d(in_ch, 256, kernel_size=3, padding=1))
-        layers.append(nn.BatchNorm2d(256))
-        layers.append(nn.ReLU(inplace=True))
-        for _ in range(2):
-            layers.append(nn.Conv2d(256, 256, kernel_size=3, padding=1))
-            layers.append(nn.BatchNorm2d(256))
-            layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.Conv2d(256, out_ch, kernel_size=1, bias=True))
-        head = nn.Sequential(*layers)
-        return head
+            elif loss_type == "bce":
+                self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(config.HEATMAP_POS_WEIGHT))
 
     def forward(self, x):
+        feats = self.backbone(x)[-1]
         if self.head_type == "regression":
-            feats = self.backbone(x)[-1]
             pooled = self.pool(feats)
             out = self.regressor(pooled)
             out = out.view(-1, self.num_points, 2)
             return out
         else:
-            feats = self.backbone(x)
-            logits = self.upsample_head(feats)
-            logits = torch.nn.functional.interpolate(logits, size=(self.hm_h, self.hm_w), mode='bilinear', align_corners=False)
-            return logits
+            heatmaps = self.heatmap_head(feats)
+            return heatmaps
 
     def _shared_step(self, batch, train=True):
         imgs = batch["image"]
         device = imgs.device
         preds = self.forward(imgs)
 
-        if self.head_type == "regression":
-            gt = batch["keypoints_norm"].to(device).float()
-            loss = self.criterion(preds, gt)
-
-        else:
-            gt_hm = batch["heatmaps"].to(device).float() 
-            if self.loss_type == "mse":
-                loss = self.criterion(torch.sigmoid(preds), gt_hm)
-            else:
-                loss = self.criterion(preds, gt_hm)
+        gt = batch["keypoints_norm"].to(device).float() if self.head_type == "regression" else batch["heatmaps"].to(device).float()
+        
+        loss = self.criterion(preds, gt)
 
         logs = {"train_loss" if train else "val_loss": loss}
         return loss, logs
