@@ -1,12 +1,12 @@
-# dataset_fixed.py
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 import dlib
 import albumentations as A
-import config
 from PIL import Image
 import json
+
+import config
 
 def read_pts(file_path):
     with open(file_path, 'r') as f:
@@ -27,57 +27,36 @@ def get_files(root_folder):
                     files.append((img_path, pts_path))
     return files
 
-def make_heatmaps(kps, hm_h, hm_w, img_h, img_w, sigma=2.0):
+def make_heatmaps(kps, H_hm, W_hm, H_img, W_img, sigma=2.0):
     K = kps.shape[0]
-    sx = float(hm_w) / float(img_w)
-    sy = float(hm_h) / float(img_h)
-    mu_x = kps[:, 0] * sx
-    mu_y = kps[:, 1] * sy
+    hm = np.zeros((K, H_hm, W_hm), dtype=np.float32)
 
-    tmp = int(3 * sigma)
-    size = 2 * tmp + 1
-    x = np.arange(0, size, 1, np.float32) - tmp
-    y = x[:, None]
-    g = np.exp(-(x**2 + y**2) / (2 * sigma * sigma)).astype(np.float32)
+    sx = float(W_hm) / float(W_img)
+    sy = float(H_hm) / float(H_img)
 
-    hm = np.zeros((K, hm_h, hm_w), dtype=np.float32)
+    tmp_size = int(3 * sigma)
+    size = 2 * tmp_size + 1
+    xg = np.arange(0, size, 1, np.float32)
+    yg = xg[:, None]
+    gaussian = np.exp(-((xg - tmp_size) ** 2 + (yg - tmp_size) ** 2) / (2 * sigma * sigma)).astype(np.float32)
 
-    for i in range(K):
-        x0 = mu_x[i]
-        y0 = mu_y[i]
-        if np.isnan(x0) or np.isnan(y0):
+    for i, (x, y) in enumerate(kps):
+        if x < 0 or y < 0 or np.isnan(x) or np.isnan(y):
             continue
-
-        ulx = int(np.floor(x0)) - tmp
-        uly = int(np.floor(y0)) - tmp
-        brx = ulx + size
-        bry = uly + size
-
-        gx0 = 0
-        gy0 = 0
-        gx1 = size
-        gy1 = size
-
-        if ulx < 0:
-            gx0 = -ulx
-            ulx = 0
-        if uly < 0:
-            gy0 = -uly
-            uly = 0
-        if brx > hm_w:
-            gx1 = size - (brx - hm_w)
-            brx = hm_w
-        if bry > hm_h:
-            gy1 = size - (bry - hm_h)
-            bry = hm_h
-
-        if gx1 <= gx0 or gy1 <= gy0:
+        mu_x = int(x * sx + 0.5)
+        mu_y = int(y * sy + 0.5)
+        ul = [mu_x - tmp_size, mu_y - tmp_size]
+        br = [mu_x + tmp_size + 1, mu_y + tmp_size + 1]
+        if ul[0] >= W_hm or ul[1] >= H_hm or br[0] < 0 or br[1] < 0:
             continue
-
-        patch = g[gy0:gy1, gx0:gx1]
-        patch = patch / patch.max()
-        hm[i, uly:bry, ulx:brx] = np.maximum(hm[i, uly:bry, ulx:brx], patch)
-
+        g_x = max(0, -ul[0]), min(br[0], W_hm) - ul[0]
+        g_y = max(0, -ul[1]), min(br[1], H_hm) - ul[1]
+        img_x = max(0, ul[0]), min(br[0], W_hm)
+        img_y = max(0, ul[1]), min(br[1], H_hm)
+        hm[i, img_y[0]:img_y[1], img_x[0]:img_x[1]] = np.maximum(
+            hm[i, img_y[0]:img_y[1], img_x[0]:img_x[1]],
+            gaussian[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+        )
     return hm
 
 def get_transforms(train=True):
@@ -109,7 +88,6 @@ class FaceLandmarksDataset(Dataset):
         self.crop_expansion = config.CROP_EXPANSION
         self.precompute = None
         if getattr(config, "PRECOMPUTE", None):
-            # PRECOMPUTE expected to be path to json
             with open(config.PRECOMPUTE, 'r') as f:
                 self.precompute = json.load(f)
         else:

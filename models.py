@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 import timm
+
 import config
 from models_utils import WingLoss, AdaptiveWingLoss, HeatmapFocalLoss, HeatmapHead
+
 class FaceAlignmentModel(pl.LightningModule):
     def __init__(self, model_type: str = "efficientnet", head_type: str = "regression", loss_type: str = "mse"):
         super().__init__()
@@ -43,7 +45,6 @@ class FaceAlignmentModel(pl.LightningModule):
 
         elif self.head_type == "heatmap":
             self.heatmap_head = HeatmapHead(in_channels=in_ch_last, num_points=self.num_points, hm_h=self.hm_h, hm_w=self.hm_w)
-
             if loss_type == "mse":
                 self.criterion = nn.MSELoss(reduction='mean')
             elif loss_type == "focal":
@@ -57,19 +58,25 @@ class FaceAlignmentModel(pl.LightningModule):
             pooled = self.pool(feats)
             out = self.regressor(pooled)
             out = out.view(-1, self.num_points, 2)
-            return out
         else:
-            heatmaps = self.heatmap_head(feats)
-            return heatmaps
-
+            out = self.heatmap_head(feats)
+        return out
+    
     def _shared_step(self, batch, train=True):
         imgs = batch["image"]
         device = imgs.device
         preds = self.forward(imgs)
 
-        gt = batch["keypoints_norm"].to(device).float() if self.head_type == "regression" else batch["heatmaps"].to(device).float()
-        
-        loss = self.criterion(preds, gt)
+        if self.head_type == "regression":
+            gt = batch["keypoints_norm"].to(device).float()
+            loss = self.criterion(preds, gt)
+
+        else:
+            gt_hm = batch["heatmaps"].to(device).float() 
+            if self.loss_type == "mse":
+                loss = self.criterion(torch.sigmoid(preds), gt_hm)
+            else:
+                loss = self.criterion(preds, gt_hm)
 
         logs = {"train_loss" if train else "val_loss": loss}
         return loss, logs

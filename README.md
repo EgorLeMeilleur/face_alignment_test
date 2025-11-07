@@ -1,60 +1,96 @@
 # Face Alignment using Deep Learning
 
-This project implements a face alignment algorithm for detecting 68 facial landmarks on a human face using modern deep learning techniques. The approach is built with PyTorch Lightning and leverages timm for model backbones.
+This project implements a face alignment algorithm for detecting 68 facial landmarks on a human face using modern deep learning techniques. The approach is built with PyTorch Lightning and leverages `timm` for model backbones.
 
-## Overview
+## Requirements
 
-The following experiments are included:
-- **EfficientVit + Wing Loss**
-- **EfficientVit + MSE**
-- **EfficientNet + Wing Loss**
-- **EfficientNet + MSE**
-- **ConvNext + Wing Loss**
-- **ConvNext + MSE**
+Install all required packages via `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
+
+Required packages include:
+*   `pytorch-lightning`
+*   `timm`
+*   `torch`
+*   `torchvision`
+*   `dlib`
+*   `matplotlib`
+*   `scikit-learn`
+*   `pillow`
+*   `numpy`
+*   `timm`
+*   `opencv-python`
+*   `albumentations`
 
 ## Data
 
-The training and testing data consist of the 300W and Menpo datasets, organized as follows:
+The training and testing data consist of the 300W and Menpo datasets. Place them in the following structure:
 
-data/ 300W/ train/ test/ Menpo/ train/ test/
-
+```bash
+data/
+├── 300W/
+│   ├── train/
+│   └── test/
+└── Menpo/
+    ├── train/
+    └── test/
+```
 
 Annotations are provided in `.pts` format (IBUG format).
 
-## Setup
+## Project Files
 
-Required packages include: pytorch-lightning, timm, torch, torchvision, dlib, fpdf, matplotlib, and scikit-learn.
+| File                  | Description                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `config.py`           | Contains hyperparameters and paths. You can change model, loss, head, etc.                       |
+| `dataset.py`          | Custom dataset loader for images, annotations, preprocessing, augmentations.                     |
+| `model.py`            | Lightning model definition using `timm` backbones, custom losses, heads.                         |
+| `train.py`            | Script to train a model.                                                                         |
+| `test.py`             | Script to test a trained model, compute CED curves, and AUC.                                     |
+| `run_experiments.py`  | Script to run all experiments in config sequentially.                                            |
+| `precompute_boxes.py` | Script to precompute dlib face boxes for dataset if dlib has been installed without gpu support. |
 
-    Data:
-    Download and place the 300W and Menpo datasets in the data directory.
+## Running Experiments
 
-Files
+### Train a Model
 
-    config.py: Contains hyperparameters and paths.
-    dataset.py: Custom dataset loader that reads images, annotations, and applies augmentations.
-    model.py: Contains the model definition using timm and the custom Wing loss.
-    train.py: Training script with TensorBoard logging.
-    test.py: Testing script that computes CED curves (and AUC) for 300W and Menpo.
-    run_experiments.py: Script to run all experiments sequentially.
-    report_generation.py: Script to generate a PDF report with experiment summaries and CED graphs.
-    README.md: This documentation file.
+```bash
+python train.py --experiment_name "experiment1" --model_type "efficientnet_b0" --loss_type "MSE" --head_type "heatmap"
+```
 
-Running Experiments
+**Supported values:**
 
-To run all experiments, execute:
+*   `--model_type`: `"efficientnet"`, `"convnext"`,
+*   `--loss_type`: `"mse"`, `"wing"`, `"awing"`, `"focal"`, `"bce"`
+*   `--head_type`: `"regression"`, `"heatmap"`
 
-    python run_experiments.py
+*All arguments have defaults set in `config.py`.*
 
-This script trains and tests each experiment variant sequentially.
+### Test a Model
 
-After experiments are complete and the CED graphs have been generated, you can create a PDF report with
+```bash
+python test.py --experiment_name "experiment1" --model_type "efficientnet_b0" --loss_type "mse" --head_type "heatmap"
+```
+This will run the model on both 300W and Menpo test sets and generate evaluation metrics.
 
-    python report_generation.py
+### Run All Experiments
 
-For generating report you need to download [fonts](https://fonts-online.ru/fonts/dejavu-sans/download) and unpack them to working folder
+```bash
+python run_experiments.py
+```
+This will sequentially train and test all configured model/loss/head combinations.
 
-TensorBoard
+## Configuration
 
-To visualize training logs, run:
+In `config.py`, you can configure:
 
-    tensorboard --logdir outputs/logs
+*   `MODEL_TYPE`       # default backbone
+*   `LOSS_TYPE`        # default loss function
+*   `HEAD_TYPE`        # regression or heatmap
+*   `BATCH_SIZE`       # batch size for training
+*   `LEARNING_RATE`    # initial learning rate
+*   `NUM_EPOCHS`       # total training epochs
+*   `Dataset paths`    # paths to datasets and outputs
+*   `Experiments`      # all experimets that will be conducted

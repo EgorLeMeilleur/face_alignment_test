@@ -60,6 +60,7 @@ class HeatmapFocalLoss(nn.Module):
             loss = loss / (pred_logits.shape[0])
         return loss
 
+
 class HeatmapHead(nn.Module):
     def __init__(self, in_channels, num_points, hm_h=64, hm_w=64):
         super().__init__()
@@ -76,10 +77,6 @@ class HeatmapHead(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(256, num_points, kernel_size=1)
         )
-
-        nn.init.normal_(self.head[-1].weight, std=0.001)
-        if self.head[-1].bias is not None:
-            nn.init.constant_(self.head[-1].bias, 0.0)
 
     def forward(self, x):
         out = self.head(x)

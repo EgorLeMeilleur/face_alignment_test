@@ -1,140 +1,124 @@
 import argparse
 from pathlib import Path
 import numpy as np
-import torch
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import auc
-import config
-from dataset import FaceLandmarksDataset, read_pts
-from models import FaceAlignmentModel
 import dlib
 from PIL import Image
-import csv
-
 import torch
 import torch.nn.functional as F
 
-def heatmaps_to_coords(heatmaps, normalize=True):
+import config
+from dataset import FaceLandmarksDataset, read_pts
+from models import FaceAlignmentModel
+
+def heatmaps_to_coords_batch(heatmaps):
     B, K, H, W = heatmaps.shape
     flat = heatmaps.view(B, K, -1)
-    soft = F.softmax(flat, dim=-1).view(B, K, H, W)
+    prob = F.softmax(flat, dim=-1)
+    prob = prob.view(B, K, H, W)
 
-    xs = torch.linspace(0, W - 1, W, device=heatmaps.device)
-    ys = torch.linspace(0, H - 1, H, device=heatmaps.device)
-    xs = xs.view(1, 1, 1, W)
-    ys = ys.view(1, 1, H, 1)
+    xs = torch.arange(W, device=heatmaps.device, dtype=heatmaps.dtype).view(1, 1, 1, W)
+    ys = torch.arange(H, device=heatmaps.device, dtype=heatmaps.dtype).view(1, 1, H, 1)
 
-    exp_x = (soft * xs).view(B, K, -1).sum(-1)
-    exp_y = (soft * ys).view(B, K, -1).sum(-1)
+    exp_x = (prob * xs).view(B, K, -1).sum(dim=-1)
+    exp_y = (prob * ys).view(B, K, -1).sum(dim=-1)
 
     coords = torch.stack([exp_x, exp_y], dim=-1)
-
-    if normalize:
-        coords[..., 0] = coords[..., 0] / (W - 1)
-        coords[..., 1] = coords[..., 1] / (H - 1)
-
-    return coords
+    return coords.cpu().numpy()
 
 
-def map_resized_to_orig(coords_resized, crop_box, scale):
-    x1, y1 = float(crop_box[0]), float(crop_box[1])
-    sx, sy = float(scale[0]), float(scale[1])
-    coords_orig = np.zeros_like(coords_resized, dtype=np.float32)
-    coords_orig[:, 0] = coords_resized[:, 0] * sx + x1
-    coords_orig[:, 1] = coords_resized[:, 1] * sy + y1
-    return coords_orig
-
-def map_hm_to_resized(peaks_hm, resized_size, hm_size):
+def map_hm_to_resized_batch(peaks_hm, resized_size, hm_size):
     H_resized, W_resized = int(resized_size[0]), int(resized_size[1])
     H_hm, W_hm = int(hm_size[0]), int(hm_size[1])
-    coords_resized = np.zeros_like(peaks_hm, dtype=np.float32)
-    coords_resized[:, 0] = peaks_hm[:, 0] * (W_resized / float(W_hm))
-    coords_resized[:, 1] = peaks_hm[:, 1] * (H_resized / float(H_hm))
-    return coords_resized
 
-def compute_nme_one(pred_points, gt_points, face_rect):
-    dists = np.linalg.norm(pred_points - gt_points, axis=1)
-    mean_px = float(np.mean(dists))
-    H = float(face_rect[3] - face_rect[1])
-    W = float(face_rect[2] - face_rect[0])
-    norm = np.sqrt(max(1.0, H * W))
-    return mean_px / norm
+    scale_x = float(W_resized) / float(W_hm)
+    scale_y = float(H_resized) / float(H_hm)
 
-def ced_and_auc(nmes, T=config.MAX_ERROR_THRESHOLD, num=200):
-    thr = np.linspace(0.0, T, num)
-    ced = np.array([np.mean(nmes < t) for t in thr])
-    auc_raw = np.trapz(ced, thr)
-    auc_norm = auc_raw / T
-    return thr, ced, auc_raw, auc_norm
+    out = np.zeros_like(peaks_hm, dtype=np.float32)
+    out[..., 0] = peaks_hm[..., 0] * scale_x
+    out[..., 1] = peaks_hm[..., 1] * scale_y
+    return out
+
+
+def map_resized_to_orig_batch(coords_resized, crop_box_batch, scale_batch):
+    B = coords_resized.shape[0]
+    out = np.zeros_like(coords_resized, dtype=np.float32)
+    for i in range(B):
+        x1, y1 = float(crop_box_batch[i, 0]), float(crop_box_batch[i, 1])
+        sx, sy = float(scale_batch[i, 0]), float(scale_batch[i, 1])
+        out[i, :, 0] = coords_resized[i, :, 0] * sx + x1
+        out[i, :, 1] = coords_resized[i, :, 1] * sy + y1
+    return out
+
 
 def count_ced(predicted_points, gt_points, normalizations):
-    ceds = []
-    for preds, gts, normalization in zip(predicted_points, gt_points, normalizations):
-        x_pred, y_pred = preds[:, ::2], preds[:, 1::2]
-        x_gt, y_gt = gts[:, ::2], gts[:, 1::2]
-        n_points = x_pred.shape[0]
+    n = predicted_points.shape[0]
+    errs = []
+    for i in range(n):
+        preds = predicted_points[i]
+        gts = gt_points[i]
+        dists = np.linalg.norm(preds - gts, axis=1)
+        avg = float(np.mean(dists))
+        errs.append(avg / float(normalizations[i]))
+    return np.sort(np.array(errs, dtype=np.float32))
 
-        diff_x = [x_gt[i] - x_pred[i] for i in range(n_points)]
-        diff_y = [y_gt[i] - y_pred[i] for i in range(n_points)]
-        dist = np.sqrt(np.square(diff_x) + np.square(diff_y))
-        avg_norm_dist = np.sum(dist) / (n_points * normalization)
-        ceds.append(avg_norm_dist)
-    ceds = np.sort(ceds)
-
-    return ceds
 
 @torch.no_grad()
-def evaluate_model(model, loader, device):
+def evaluate_model(model, loader, device, hm_size=(64,64)):
     model.to(device)
     model.eval()
 
     all_preds = []
     all_gts = []
-    all_nms = []
+    all_norms = []
+
+    H_hm, W_hm = int(hm_size[0]), int(hm_size[1])
+
     for batch in loader:
         imgs = batch["image"].to(device)
         B = imgs.shape[0]
+
         out = model(imgs)
-        for i in range(B):
-            face_rect = batch["face_rect"][i].cpu().numpy()
-            crop_box = batch.get("crop_box", None)
-            scale = batch.get("scale", None)
-            if crop_box is None or scale is None:
-                resized_h, resized_w = imgs.shape[2], imgs.shape[3]
-                crop_box = np.array([0, 0, resized_w - 1, resized_h - 1], dtype=np.float32)
-                scale = np.array([1.0, 1.0], dtype=np.float32)
+
+        crop_box_batch = batch["crop_box"].cpu().numpy().astype(np.float32)
+        scale_batch = batch["scale"].cpu().numpy().astype(np.float32)
+
+        kps_norm = batch["keypoints_norm"].cpu().numpy()
+        resized_h, resized_w = imgs.shape[2], imgs.shape[3]
+        kps_px = np.zeros_like(kps_norm, dtype=np.float32)
+        kps_px[..., 0] = kps_norm[..., 0] * float(resized_w)
+        kps_px[..., 1] = kps_norm[..., 1] * float(resized_h)
+        gt_orig_batch = map_resized_to_orig_batch(kps_px, crop_box_batch, scale_batch)
+
+        if out.dim() == 3:
+            preds_norm = out.detach().cpu().numpy()
+            pred_px = np.zeros_like(preds_norm, dtype=np.float32)
+            pred_px[..., 0] = preds_norm[..., 0] * float(resized_w)
+            pred_px[..., 1] = preds_norm[..., 1] * float(resized_h)
+            pred_orig_batch = map_resized_to_orig_batch(pred_px, crop_box_batch, scale_batch)
+
+        elif out.dim() == 4:
+            hm_tensor = out.detach()
+            if hm_tensor.shape[2] != H_hm or hm_tensor.shape[3] != W_hm:
+                H_hm_model, W_hm_model = hm_tensor.shape[2], hm_tensor.shape[3]
             else:
-                crop_box = crop_box[i].cpu().numpy()
-                scale = scale[i].cpu().numpy()
+                H_hm_model, W_hm_model = H_hm, W_hm
 
-            resized_h, resized_w = imgs.shape[2], imgs.shape[3]
-            kps_norm = batch["keypoints_norm"][i].cpu().numpy()
-            kps_px = np.zeros_like(kps_norm)
-            kps_px[:,0] = kps_norm[:,0] * float(resized_w)
-            kps_px[:,1] = kps_norm[:,1] * float(resized_h)
-            gt_orig = map_resized_to_orig(kps_px, crop_box, scale)
+            peaks = heatmaps_to_coords_batch(hm_tensor)
+            coords_resized_batch = map_hm_to_resized_batch(peaks, (resized_h, resized_w), (H_hm_model, W_hm_model))
+            pred_orig_batch = map_resized_to_orig_batch(coords_resized_batch, crop_box_batch, scale_batch)
 
-            if out.dim() == 3:
-                pred_i = out[i].detach().cpu().numpy()
-                pred_px = np.zeros_like(pred_i)
-                pred_px[:,0] = pred_i[:,0] * float(resized_w)
-                pred_px[:,1] = pred_i[:,1] * float(resized_h)
-                pred_orig = map_resized_to_orig(pred_px, crop_box, scale)
+        face_rects = batch["face_rect"].cpu().numpy().astype(np.float32)
+        norms = np.sqrt(np.maximum(1.0, (face_rects[:, 3] - face_rects[:, 1]) * (face_rects[:, 2] - face_rects[:, 0])))
 
-            elif out.dim() == 4:
-                hm = torch.nn.functional.sigmoid(out[i]).detach().cpu().numpy()
-                peaks_hm = heatmaps_to_coords(hm)
-                coords_resized = map_hm_to_resized(peaks_hm, (resized_h, resized_w), (hm.shape[1], hm.shape[2]))
-                pred_orig = map_resized_to_orig(coords_resized, crop_box, scale)
+        for i in range(B):
+            all_preds.append(pred_orig_batch[i])
+            all_gts.append(gt_orig_batch[i])
+            all_norms.append(float(norms[i]))
 
-            all_preds.append(pred_orig)
-            all_gts.append(gt_orig)
-            Hf = float(face_rect[3] - face_rect[1])
-            Wf = float(face_rect[2] - face_rect[0])
-            all_nms.append(np.sqrt(max(1.0, Hf * Wf)))
-
-    return np.array(all_preds), np.array(all_gts), np.array(all_nms)
+    return np.array(all_preds), np.array(all_gts), np.array(all_norms)
 
 def evaluate_dlib(predictor, files, detector):
     preds = []
@@ -224,29 +208,9 @@ def test(experiment_name, model_type, loss_type, head_type):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE)
-    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE)
-    parser.add_argument("--head_type", type=str, default=config.HEAD_TYPE)
+    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE, options=['efficientnet', 'convnext'])
+    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, options=['mse', 'wing', 'awing', 'focal'])
+    parser.add_argument("--head_type", type=str, default=config.HEAD_TYPE, options=['regression', 'heatmap'])
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
     test(args.experiment_name, args.model_type, args.loss_type, args.head_type)
-
-
-#  try:
-#         model = FaceAlignmentModel.load_from_checkpoint(
-#             str(checkpoint_path), map_location='cpu',
-#             model_type=model_type, loss_type=loss_type, head_type=head_type
-#         )
-#         print("Loaded model via Lightning.load_from_checkpoint(...) with provided args.")
-#         return model
-
-#     except Exception as e:
-#         print("load_from_checkpoint with args failed (fallback to manual loading).")
-#         print("Reason:", e)
-
-#     # Попытка 2: ручная загрузка + фильтрация state_dict
-#     ckpt = torch.load(str(checkpoint_path), map_location='cpu')
-
-#     model = FaceAlignmentModel(model_type=model_type, loss_type=loss_type, head_type=head_type)
-
-#     load_res = model.load_state_dict(filtered, strict=False)

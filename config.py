@@ -15,7 +15,7 @@ NUM_WORKERS = 10
 PRECOMPUTE = "precomputed_face_boxes.json"
 BATCH_SIZE = 64
 LEARNING_RATE = 1e-3
-EPOCHS = 10
+EPOCHS = 40
 IMAGE_SIZE = 224
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
@@ -34,12 +34,12 @@ EXPERIMENTS = [
     {"name": "efficientnet_mse_heatmap", "model_type": "efficientnet", "loss_type": "mse", "head_type": "heatmap"},
     {"name": "efficientnet_focal_heatmap", "model_type": "efficientnet", "loss_type": "focal", "head_type": "heatmap"},
     {"name": "efficientnet_bce_heatmap", "model_type": "efficientnet", "loss_type": "bce", "head_type": "heatmap"},
-    # {"name": "convnext_mse_regression", "model_type": "convnext", "loss_type": "mse", "head_type": "regression"},
-    # {"name": "convnext_wing_regression", "model_type": "convnext", "loss_type": "wing", "head_type": "regression"},
-    # {"name": "convnext_awing_regression", "model_type": "convnext", "loss_type": "awing", "head_type": "regression"},
-    # {"name": "convnext_mse_heatmap", "model_type": "convnext", "loss_type": "mse", "head_type": "heatmap"},
-    # {"name": "convnext_focal_heatmap", "model_type": "convnext", "loss_type": "focal", "head_type": "heatmap"},
-    # {"name": "convnext_bce_heatmap", "model_type": "convnext", "loss_type": "bce", "head_type": "heatmap"},
+    {"name": "convnext_mse_regression", "model_type": "convnext", "loss_type": "mse", "head_type": "regression"},
+    {"name": "convnext_wing_regression", "model_type": "convnext", "loss_type": "wing", "head_type": "regression"},
+    {"name": "convnext_awing_regression", "model_type": "convnext", "loss_type": "awing", "head_type": "regression"},
+    {"name": "convnext_mse_heatmap", "model_type": "convnext", "loss_type": "mse", "head_type": "heatmap"},
+    {"name": "convnext_focal_heatmap", "model_type": "convnext", "loss_type": "focal", "head_type": "heatmap"},
+    {"name": "convnext_bce_heatmap", "model_type": "convnext", "loss_type": "bce", "head_type": "heatmap"},
 ]
 
 MODEL_TYPE = "efficientnet"

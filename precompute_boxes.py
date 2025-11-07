@@ -1,10 +1,10 @@
-# precompute_boxes.py
 from pathlib import Path
 import json
 import cv2
 import dlib
-from dataset import get_files
 import tqdm
+
+from dataset import get_files
 
 detector = dlib.get_frontal_face_detector()
 files = get_files([Path("data/300W/train"), Path("data/Menpo/train")])

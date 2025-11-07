@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, random_split
-import torch
+
 import config
 from dataset import FaceLandmarksDataset, get_files
 from models import FaceAlignmentModel
@@ -50,9 +50,9 @@ def train(experiment_name, model_type, loss_type, head_type):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE)
-    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE)
-    parser.add_argument("--head_type", type=str, default=config.HEAD_TYPE)
+    parser.add_argument("--model_type", type=str, default=config.MODEL_TYPE, options=['efficientnet', 'convnext'])
+    parser.add_argument("--loss_type", type=str, default=config.LOSS_TYPE, options=['mse', 'wing', 'awing', 'focal'])
+    parser.add_argument("--head_type", type=str, default=config.HEAD_TYPE, options=['regression', 'heatmap'])
     parser.add_argument("--experiment_name", type=str, default="experiment")
     args = parser.parse_args()
     train(args.experiment_name, args.model_type, args.loss_type, args.head_type)

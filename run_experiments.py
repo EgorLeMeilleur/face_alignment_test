@@ -1,6 +1,4 @@
-from pathlib import Path
 import config
-import os
 from train import train
 from test import test
 
