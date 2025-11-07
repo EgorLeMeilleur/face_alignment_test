@@ -2,6 +2,10 @@
 
 This project implements a face alignment algorithm for detecting 68 facial landmarks on a human face using modern deep learning techniques. The approach is built with PyTorch Lightning and leverages `timm` for model backbones.
 
+## Report
+
+`experiments_report.pdf` contains all the information about the experiments performed: the architectures used, all the results, etc.
+
 ## Requirements
 
 Install all required packages via `requirements.txt`:
