@@ -53,7 +53,7 @@ Annotations are provided in `.pts` format (IBUG format).
 | `model.py`            | Lightning model definition using `timm` backbones, custom losses, heads.                         |
 | `train.py`            | Script to train a model.                                                                         |
 | `test.py`             | Script to test a trained model, compute CED curves, and AUC.                                     |
-| `run_experiments.py`  | Script to run all experiments in config sequentially.                                            |
+| `run_experiments.py`  | Script to run all experiments (train and test) in config sequentially.                           |
 | `precompute_boxes.py` | Script to precompute dlib face boxes for dataset if dlib has been installed without gpu support. |
 
 ## Running Experiments
@@ -85,6 +85,10 @@ This will run the model on both 300W and Menpo test sets and generate evaluation
 python run_experiments.py
 ```
 This will sequentially train and test all configured model/loss/head combinations.
+```bash
+python run_experiments.py --best
+```
+When the `--best` flag is used, the script will train and test only the best-performing experiment.
 
 ## Configuration
 

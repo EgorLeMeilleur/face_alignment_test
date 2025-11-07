@@ -42,6 +42,8 @@ EXPERIMENTS = [
     {"name": "convnext_bce_heatmap", "model_type": "convnext", "loss_type": "bce", "head_type": "heatmap"},
 ]
 
+BEST_EXPERIMENT = {"name": "efficientnet_mse_heatmap", "model_type": "efficientnet", "loss_type": "mse", "head_type": "heatmap"}
+
 MODEL_TYPE = "efficientnet"
 LOSS_TYPE = "mse"
 HEAD_TYPE = "regression"
